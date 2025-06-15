@@ -1,57 +1,72 @@
+import os
+import json
+from dotenv import load_dotenv
 import discord
 from discord.ext import commands
-import os
 
-intents = discord.Intents.all()
+# Load token from .env
+load_dotenv()
+TOKEN = os.getenv("DISCORD_TOKEN")
+
+intents = discord.Intents.default()
+intents.message_content = True
+
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Simple in-memory storage
-ads_data = {}
-guides = {}
+DATA_FILE = "ads_data.json"
+
+# Ensure data file exists
+if not os.path.exists(DATA_FILE):
+    with open(DATA_FILE, "w") as f:
+        json.dump({}, f)
 
 @bot.event
 async def on_ready():
     print(f"Bot connected as {bot.user}")
 
 @bot.command()
-async def ads(ctx, amount: int):
-    user = ctx.author.name
-    ads_data[user] = ads_data.get(user, 0) + amount
-    await ctx.send(f"{user} reported {amount} ads. Total: {ads_data[user]}")
+async def ads(ctx, number: int):
+    """Report the number of ads you've sent."""
+    username = str(ctx.author)
+
+    # Load existing data
+    try:
+        with open(DATA_FILE, "r") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {}
+
+    # Update user's ad count
+    data[username] = data.get(username, 0) + number
+
+    # Save updated data
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f)
+
+    await ctx.send(f"{username} reported {number} ads. Total: {data[username]}")
 
 @bot.command()
-async def ads_leaderboard(ctx):
-    leaderboard = sorted(ads_data.items(), key=lambda x: x[1], reverse=True)
-    msg = "**📊 Ads Leaderboard:**\n"
-    for i, (user, total) in enumerate(leaderboard, start=1):
-        msg += f"{i}. {user}: {total}\n"
-    await ctx.send(msg)
+async def leaderboard(ctx):
+    """Show leaderboard of users who sent the most ads."""
+    try:
+        with open(DATA_FILE, "r") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        await ctx.send("No ad data available yet.")
+        return
 
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def announce(ctx, channel: discord.TextChannel, *, message):
-    await channel.send(f"📢 **Announcement:** {message}")
-    await ctx.send("✅ Announcement sent.")
+    if not data:
+        await ctx.send("No ads have been reported yet.")
+        return
 
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def guide_add(ctx, title, *, content):
-    guides[title.lower()] = content
-    await ctx.send(f"✅ Guide '{title}' added.")
+    # Sort data by total ads sent
+    sorted_data = sorted(data.items(), key=lambda item: item[1], reverse=True)
 
-@bot.command()
-async def guide(ctx, title):
-    guide = guides.get(title.lower())
-    if guide:
-        await ctx.send(f"📘 **{title}**\n{guide}")
-    else:
-        await ctx.send("❌ Guide not found.")
+    leaderboard_text = "**📊 Ads Leaderboard:**\n"
+    for i, (user, count) in enumerate(sorted_data[:10], start=1):
+        leaderboard_text += f"{i}. {user}: {count} ads\n"
 
-@bot.command()
-async def guide_list(ctx):
-    if not guides:
-        await ctx.send("No guides added yet.")
-    else:
-        await ctx.send("📘 Guides:\n" + "\n".join(guides.keys()))
+    await ctx.send(leaderboard_text)
 
-bot.run(os.getenv("DISCORD_TOKEN"))
+# Run the bot
+bot.run(TOKEN)
