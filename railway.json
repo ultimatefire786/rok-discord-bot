@@ -1,7 +1,8 @@
 {
   "build": {
     "env": {
-      "DISCORD_TOKEN": "@discord_token"
+      "PYTHONUNBUFFERED": "1"
     }
-  }
+  },
+  "start": "pip install -r requirements.txt && python bot.py"
 }
