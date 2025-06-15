@@ -1,4 +1,6 @@
 import discord
+import datetime
+from collections import defaultdict, deque
 from discord.ext import commands
 import os
 from dotenv import load_dotenv
@@ -13,6 +15,12 @@ intents = discord.Intents.default()
 intents.message_content = True  # Required for reading messages
 
 bot = commands.Bot(command_prefix=PREFIX, intents=intents)
+
+
+# --- CONFIGURATION ---
+TRUSTED_STAFF = {807758543829598230}  # Add officer/admin IDs you trust
+MOD_LOG_CHANNEL_ID = 123456789012345678  # Replace with your log channel ID
+
 
 # Store ads per user (in-memory)
 user_ads = defaultdict(int)
@@ -49,5 +57,48 @@ async def leaderboard(ctx):
 async def reset_ads(ctx):
     user_ads.clear()
     await ctx.send("All ad reports have been reset.")
+
+
+# --- BAN TRACKER ---
+ban_tracker = defaultdict(lambda: deque(maxlen=3))
+
+@bot.event
+async def on_member_ban(guild, user):
+    async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.ban):
+        if entry.target.id != user.id:
+            continue
+
+        banner = entry.user
+        now = datetime.datetime.utcnow()
+
+        if banner.id in TRUSTED_STAFF:
+            return  # Skip trusted staff
+
+        ban_tracker[banner.id].append(now)
+
+        if len(ban_tracker[banner.id]) == 3:
+            first_ban_time = ban_tracker[banner.id][0]
+            if (now - first_ban_time) <= datetime.timedelta(hours=24):
+                try:
+                    await guild.ban(banner, reason="Anti-nuke: Banned 3 users in under 24 hours.")
+                    print(f"[ANTI-NUKE] {banner} auto-banned for mass banning users.")
+
+                    try:
+                        await banner.send("You were banned for banning 3 users in less than 24 hours.")
+                    except discord.Forbidden:
+                        pass
+
+                    mod_log = guild.get_channel(MOD_LOG_CHANNEL_ID)
+                    if mod_log:
+                        await mod_log.send(
+                            f"🚨 **Anti-Nuke Triggered**\n"
+                            f"👤 `{banner}` (`{banner.id}`) was auto-banned for banning 3 users within 24 hours."
+                        )
+
+                    del ban_tracker[banner.id]
+                except Exception as e:
+                    print(f"Failed to ban {banner}: {e}")
+        break
+
 
 bot.run(TOKEN)
