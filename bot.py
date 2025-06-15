@@ -1,72 +1,53 @@
-import os
-import json
-from dotenv import load_dotenv
 import discord
 from discord.ext import commands
+import os
+from dotenv import load_dotenv
+from collections import defaultdict
 
-# Load token from .env
+# Load token and prefix from .env file
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
+PREFIX = "!"
 
 intents = discord.Intents.default()
-intents.message_content = True
+intents.message_content = True  # Required for reading messages
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix=PREFIX, intents=intents)
 
-DATA_FILE = "ads_data.json"
-
-# Ensure data file exists
-if not os.path.exists(DATA_FILE):
-    with open(DATA_FILE, "w") as f:
-        json.dump({}, f)
+# Store ads per user (in-memory)
+user_ads = defaultdict(int)
 
 @bot.event
 async def on_ready():
     print(f"Bot connected as {bot.user}")
 
-@bot.command()
-async def ads(ctx, number: int):
-    """Report the number of ads you've sent."""
-    username = str(ctx.author)
-
-    # Load existing data
-    try:
-        with open(DATA_FILE, "r") as f:
-            data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        data = {}
-
-    # Update user's ad count
-    data[username] = data.get(username, 0) + number
-
-    # Save updated data
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f)
-
-    await ctx.send(f"{username} reported {number} ads. Total: {data[username]}")
-
-@bot.command()
-async def leaderboard(ctx):
-    """Show leaderboard of users who sent the most ads."""
-    try:
-        with open(DATA_FILE, "r") as f:
-            data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        await ctx.send("No ad data available yet.")
+@bot.command(name='ads')
+async def report_ads(ctx, number: int):
+    if number < 0:
+        await ctx.send("You can't report a negative number of ads.")
         return
+    user_id = ctx.author.id
+    user_ads[user_id] += number
+    await ctx.send(f"{ctx.author.display_name} reported {number} ads. Total: {user_ads[user_id]}")
 
-    if not data:
+@bot.command(name='leaderboard')
+async def leaderboard(ctx):
+    if not user_ads:
         await ctx.send("No ads have been reported yet.")
         return
 
-    # Sort data by total ads sent
-    sorted_data = sorted(data.items(), key=lambda item: item[1], reverse=True)
+    # Sort users by most ads
+    sorted_ads = sorted(user_ads.items(), key=lambda x: x[1], reverse=True)
+    message = "**Ad Reporting Leaderboard**\n"
+    for i, (user_id, total) in enumerate(sorted_ads[:10], start=1):
+        user = await bot.fetch_user(user_id)
+        message += f"{i}. {user.display_name} – {total} ads\n"
+    await ctx.send(message)
 
-    leaderboard_text = "**📊 Ads Leaderboard:**\n"
-    for i, (user, count) in enumerate(sorted_data[:10], start=1):
-        leaderboard_text += f"{i}. {user}: {count} ads\n"
+@bot.command(name='resetads')
+@commands.has_permissions(administrator=True)
+async def reset_ads(ctx):
+    user_ads.clear()
+    await ctx.send("All ad reports have been reset.")
 
-    await ctx.send(leaderboard_text)
-
-# Run the bot
 bot.run(TOKEN)
